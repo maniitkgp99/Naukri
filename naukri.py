@@ -10,7 +10,6 @@ import time
 from datetime import datetime
 from random import choice, randint
 from string import ascii_uppercase, digits
-
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -44,9 +43,19 @@ headless = False
 # Set login URL
 NaukriURL = constants.NAUKRI_LOGIN_URL
 
+# Get the directory where the script is located
+script_dir = os.path.dirname(os.path.abspath(__file__))
+log_file_path = os.path.join(script_dir, "naukri.log")
+
 logging.basicConfig(
-    level=logging.INFO, filename="naukri.log", format="%(asctime)s    : %(message)s"
+    filename=log_file_path,  # This forces it to save in your script folder
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
+
+# logging.basicConfig(
+#     level=logging.INFO, filename="naukri.log", format="%(asctime)s    : %(message)s"
+# )
 # logging.disable(logging.CRITICAL)
 os.environ["WDM_LOCAL"] = "1"
 os.environ["WDM_LOG_LEVEL"] = "0"
@@ -371,8 +380,6 @@ def UpdateProfile(driver):
     except Exception as e:
         catch(e)
 
-
-
 def UpdateResume():
     try:
         # Random text with random location and size
@@ -411,62 +418,75 @@ def UpdateResume():
     return os.path.abspath(originalResumePath)
 
 
-
 def UploadResume(driver, resumePath):
     try:
-        attachCVID = "attachCV"
-        lazyattachCVID = "lazyAttachCV"
-        uploadCV_btn = "//*[contains(@class, 'upload')]//input[@value='Update resume']"
-        CheckPointXpath = "//*[contains(@class, 'updateOn')]"
-        saveXpath = "//button[@type='button']"
-        close_locator = "//*[contains(@class, 'crossIcon')]"
+        log_msg(f"Starting Upload Process for: {resumePath}")
+        # Locators based on Naukri's current DOM (per your screenshot)
+        file_input_id = "attachCV"
+        # The visual 'Update' button you saw in the screenshot
+        dummy_button_xpath = "//input[@value='Update resume']" 
+        checkpoint_xpath = "//span[contains(@class, 'updated-at') or contains(@class, 'updateOn')]"
+        close_modal_xpath = "//*[contains(@class, 'crossIcon')]"
 
         driver.get(constants.NAUKRI_PROFILE_URL)
+        time.sleep(3) # Give the SPA time to settle
 
-        time.sleep(2)
-        if WaitTillElementPresent(driver, close_locator, "XPATH", 10):
-            GetElement(driver, close_locator, locator="XPATH").click()
-            time.sleep(2)
+        # 1. Handle annoying popups/modals first
+        if WaitTillElementPresent(driver, close_modal_xpath, "XPATH", 5):
+            try:
+                GetElement(driver, close_modal_xpath, locator="XPATH").click()
+                print("Closed initial popup.")
+                time.sleep(1)
+            except:
+                pass
 
-        if WaitTillElementPresent(driver, lazyattachCVID, locator="ID", timeout=5):
-            AttachElement = GetElement(driver, uploadCV_btn, locator="XPATH")
-            AttachElement.send_keys(os.path.abspath(resumePath))
-
-        if WaitTillElementPresent(driver, attachCVID, locator="ID", timeout=5):
-            AttachElement = GetElement(driver, attachCVID, locator="ID")
-            AttachElement.send_keys(os.path.abspath(resumePath))
-
-        if WaitTillElementPresent(driver, saveXpath, locator="ID", timeout=5):
-            saveElement = GetElement(driver, saveXpath, locator="XPATH")
-            saveElement.click()
-
-        WaitTillElementPresent(driver, CheckPointXpath, locator="XPATH", timeout=30)
-        CheckPoint = GetElement(driver, CheckPointXpath, locator="XPATH")
-        if CheckPoint:
-            LastUpdatedDate = CheckPoint.text
-            todaysDate1 = datetime.today().strftime("%b %d, %Y")
-            todaysDate2 = datetime.today().strftime("%b %#d, %Y")
-            if todaysDate1 in LastUpdatedDate or todaysDate2 in LastUpdatedDate:
-                log_msg(
-                    "Resume Document Upload Successful. Last Updated date = %s"
-                    % LastUpdatedDate
-                )
-            else:
-                log_msg(
-                    "Resume Document Upload failed. Last Updated date = %s"
-                    % LastUpdatedDate
-                )
+        # 2. Perform the Upload
+        # We target the actual file input ID 'attachCV' directly.
+        # This works even if the element is hidden (style="display: none")
+        if WaitTillElementPresent(driver, file_input_id, locator="ID", timeout=10):
+            print("Found file input, uploading...")
+            attach_element = GetElement(driver, file_input_id, locator="ID")
+            
+            absolute_path = os.path.abspath(resumePath)
+            attach_element.send_keys(absolute_path)
+            
+            # Naukri usually auto-saves on upload, but if a 'Save' button appears:
+            # Add logic here if your specific profile version requires a 'Save' click.
+            
         else:
-            log_msg("Resume Document Upload failed. Last Updated date not found.")
+            log_msg("Error: Could not find the upload input element (attachCV).")
+            return
+
+        # 3. Verification Logic
+        print("Waiting for upload verification...")
+        if WaitTillElementPresent(driver, checkpoint_xpath, locator="XPATH", timeout=20):
+            check_point = GetElement(driver, checkpoint_xpath, locator="XPATH")
+            last_updated_text = check_point.text
+            
+            # Check for today's date in various formats
+            today = datetime.today()
+            date_formats = [
+                today.strftime("%b %d, %Y"),  # May 07, 2026
+                today.strftime("%b %#d, %Y"), # May 7, 2026 (Windows specific)
+                "Today"                       # Naukri often just says 'Today'
+            ]
+            
+            if any(fmt.lower() in last_updated_text.lower() for fmt in date_formats):
+                log_msg(f"Success: Resume updated today! ({last_updated_text})")
+            else:
+                log_msg(f"Warning: Uploaded, but 'Last Updated' ({last_updated_text}) doesn't match today.")
+        else:
+            log_msg("Verification failed: Could not find the 'Last Updated' timestamp.")
 
     except Exception as e:
         catch(e)
+    
     time.sleep(2)
-
 
 def main():
     log_msg("-----Naukri.py Script Run Begin-----")
-    driver = None
+    # driver = None
+    # driver = webdriver.Chrome()
     try:
         status, driver = naukriLogin(headless)
         if status:

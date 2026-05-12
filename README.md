@@ -30,6 +30,8 @@ pip install -r requirements.txt    # Install dependencies
 
 Configuration: Update `RESUME_PATH`, `USERNAME`, `PASSWORD`, and `MOBILE` directly in `constants.py` before running the script.
 
+give your full resume path into the RESUME_PATH, code will run smoothly with automation.
+
 ### Run the Script
 ```bash
 python naukri.py
